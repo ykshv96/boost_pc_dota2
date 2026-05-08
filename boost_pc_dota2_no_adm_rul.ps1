@@ -1,77 +1,75 @@
-# --- ИНИЦИАЛИЗАЦИЯ ---
+# --- UNIVERSAL USER-MODE BOOSTER (Dota 2 / CS2 / BF) ---
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-Write-Host ">>> ЗАПУСК КЛУБНОЙ ОПТИМИЗАЦИИ (БЕЗ ПРАВ АДМИНА)..." -ForegroundColor Cyan
+Write-Host ">>> ЗАПУСК КЛУБНОЙ ОПТИМИЗАЦИИ (БЕЗ АДМИН-ПРАВ) <<<" -ForegroundColor Cyan
 
-# 1. ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ (Driver-Level Tweaks без реестра)
-# Эти команды заставляют драйвер NVIDIA работать в режиме низкой задержки для текущей сессии
+# 1. ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ (Форсируем драйвер NVIDIA/AMD на Low Latency)
+# Работает для всех игр в текущей сессии пользователя
 [Environment]::SetEnvironmentVariable("__GL_THREADED_OPTIMIZATIONS", "1", "User")
 [Environment]::SetEnvironmentVariable("__GL_MAX_FRAMES_ALLOWED", "1", "User")
 [Environment]::SetEnvironmentVariable("DXVK_ASYNC", "1", "User")
-Write-Host "[+] Переменные окружения: Драйвер настроен на Low Latency." -ForegroundColor Green
+Write-Host "[+] Driver Environment: Forced Low Latency Mode" -ForegroundColor Green
 
-# 2. ОПТИМИЗАЦИЯ ПОЛЬЗОВАТЕЛЬСКОГО РЕЕСТРА (HKCU)
-$regPath = "HKCU:\Control Panel\Desktop"
-Set-ItemProperty -Path $regPath -Name "MenuShowDelay" -Value 0 -ErrorAction SilentlyContinue
-Set-ItemProperty -Path "HKCU:\Control Panel\Mouse" -Name "MouseSpeed" -Value 0 -ErrorAction SilentlyContinue
-# Отключение Game Bar (который часто ест ресурсы в фоне)
-Set-ItemProperty -Path "HKCU:\Software\Microsoft\GameBar" -Name "UseMsXboxAppGamerDVR" -Value 0 -ErrorAction SilentlyContinue
-Write-Host "[+] Реестр пользователя: Задержки меню и ускорение мыши отключены." -ForegroundColor Green
+# 2. РЕЕСТР ПОЛЬЗОВАТЕЛЯ (HKCU - права не нужны)
+$regMouse = "HKCU:\Control Panel\Mouse"
+Set-ItemProperty -Path $regMouse -Name "MouseSpeed" -Value 0 -ErrorAction SilentlyContinue
+Set-ItemProperty -Path $regMouse -Name "MouseThreshold1" -Value 0 -ErrorAction SilentlyContinue
+Set-ItemProperty -Path $regMouse -Name "MouseThreshold2" -Value 0 -ErrorAction SilentlyContinue
 
-# 3. ИНЪЕКЦИЯ КОНФИГА (Engine Optimization)
-try {
-    $steamPath = (Get-ItemProperty -Path "HKCU:\Software\Valve\Steam").SteamPath
-    $dotaCfgPath = "$steamPath\steamapps\common\dota 2 beta\game\dota\cfg"
-    
-    if (!(Test-Path $dotaCfgPath)) { New-Item -Path $dotaCfgPath -ItemType Directory -Force | Out-Null }
-    
-    $cfgContent = @"
-// СЕТЬ (Минимизация пинга и джиттера)
-rate "1000000"
-cl_interp "0"
-cl_interp_ratio "1"
-cl_cmdrate "128"
-cl_updaterate "128"
-cl_lagcompensation "1"
+$regDesktop = "HKCU:\Control Panel\Desktop"
+Set-ItemProperty -Path $regDesktop -Name "MenuShowDelay" -Value 0 -ErrorAction SilentlyContinue
+Write-Host "[+] User Registry: Mouse Acceleration & Menu Delays Disabled" -ForegroundColor Green
 
-// ВВОД (Нулевая задержка мыши)
-m_rawinput "1"
-cl_input_latency_override "1"
+# 3. АВТО-ПОИСК И ИНЪЕКЦИЯ КОНФИГОВ
+$steamPath = (Get-ItemProperty -Path "HKCU:\Software\Valve\Steam").SteamPath
+$common = "$steamPath\steamapps\common"
 
-// ГРАФИЧЕСКИЙ ДВИЖОК
-fps_max "0"
-mat_queue_mode "2"
-engine_no_focus_sleep "0"
-snd_mix_async "1"
-r_render_to_texture_upscale "0"
-"@
-    Set-Content -Path "$dotaCfgPath\autoexec_club.cfg" -Value $cfgContent -Force
-    Write-Host "[+] Engine Config: Создан autoexec_club.cfg." -ForegroundColor Green
-} catch {
-    Write-Host "[!] Ошибка: Не удалось найти папку Доты." -ForegroundColor Red
+# Функция для безопасной записи конфига
+function Write-GameCfg($Path, $FileName, $Content) {
+    if (Test-Path $Path) {
+        Set-Content -Path "$Path\$FileName" -Value $Content -Force
+        return "SUCCESS"
+    }
+    return "NOT FOUND"
 }
 
-# 4. ПОДГОТОВКА ПАРАМЕТРОВ ЗАПУСКА
-$launchOptions = "-novid -high -map dota -dx11 -nojoy -preload +exec autoexec_club.cfg"
-$launchOptions | Set-Clipboard
-Write-Host "`n[!!!] ПАРАМЕТРЫ ЗАПУСКА СКОПИРОВАНЫ В БУФЕР ОБМЕНА." -ForegroundColor Yellow
-Write-Host "Вставь их в Steam (Свойства Dota 2): $launchOptions" -ForegroundColor White
+# Конфиги для разных игр
+$dotaContent = "fps_max 0`ncl_interp 0`ncl_interp_ratio 1`nm_rawinput 1`nsnd_mix_async 1"
+$cs2Content = "fps_max 0`ncl_interp 0.015625`ncl_interp_ratio 1`nengine_no_focus_sleep 0"
+$bfContent = "Thread.ProcessorCount 8`nThread.MaxProcessorCount 8`nRenderDevice.Dx12Enable 1`nRenderDevice.FutureFrameRendering 0"
 
-# 5. МОНИТОРИНГ ПРОЦЕССА (Авто-Приоритет)
-Write-Host "`n>>> Ожидание запуска Dota 2 для форсирования приоритета..." -ForegroundColor Cyan
+$resDota = Write-GameCfg "$common\dota 2 beta\game\dota\cfg" "autoexec.cfg" $dotaContent
+$resCS2 = Write-GameCfg "$common\Counter-Strike Global Offensive\game\csgo\cfg" "autoexec.cfg" $cs2Content
+$resBF = Write-GameCfg "$common\Battlefield 2042" "user.cfg" $bfContent
+
+# 4. ОТЧЕТ ПО ИГРАМ
+Write-Host "`n--- ИГРОВЫЕ КОНФИГИ ---" -ForegroundColor Yellow
+Write-Host "Dota 2: $resDota"
+Write-Host "CS2:    $resCS2"
+Write-Host "BF2042: $resBF"
+
+# 5. ПАРАМЕТРЫ ЗАПУСКА (Универсальные)
+$launchOptions = "-novid -high -dx11 -nojoy +exec autoexec.cfg"
+$launchOptions | Set-Clipboard
+Write-Host "`n[!] ПАРАМЕТРЫ ЗАПУСКА В БУФЕРЕ ОБМЕНА." -ForegroundColor Yellow
+Write-Host "Вставь их в Steam для нужной игры (ПКМ -> Свойства)." -ForegroundColor Gray
+
+# 6. МОНИТОРИНГ И ПРИОРИТЕТ
+Write-Host "`n>>> Скрипт ждет запуска игры (Dota2/CS2/BF)..." -ForegroundColor Cyan
+$games = @("dota2", "cs2", "BF2042")
+
 while($true) {
-    $proc = Get-Process "dota2" -ErrorAction SilentlyContinue
-    if ($proc) {
-        try {
-            $proc.PriorityClass = "High"
-            Write-Host "[SUCCESS] Процесс найден! Выставлен ВЫСОКИЙ приоритет." -ForegroundColor Green
-            break
-        } catch {
-            Write-Host "[!] Защита клуба блокирует изменение приоритета. Пропускаю." -ForegroundColor Yellow
-            break
+    foreach ($game in $games) {
+        $proc = Get-Process $game -ErrorAction SilentlyContinue
+        if ($proc) {
+            try {
+                $proc.PriorityClass = "High"
+                Write-Host "[!] Процесс $game обнаружен! Приоритет: HIGH." -ForegroundColor Green
+                exit
+            } catch {
+                Write-Host "[X] Защита клуба блокирует приоритет для $game." -ForegroundColor Red
+                exit
+            }
         }
     }
-    Start-Sleep -Seconds 3
+    Start-Sleep -Seconds 5
 }
-
-Write-Host "`nГотово. Можешь играть." -ForegroundColor Cyan
-Start-Sleep -Seconds 5
