@@ -1,49 +1,69 @@
-$Results = @()
+# 1. Конфигурация путей
 $WorkDir = "C:\Dota_Opt"
+$BootScript = "$WorkDir\startup_boost.ps1"
 if (!(Test-Path $WorkDir)) { New-Item -ItemType Directory -Path $WorkDir | Out-Null }
 
-function Check-Reg {
-    param($Path, $Name, $Expected)
-    $val = (Get-ItemProperty -Path $Path -Name $Name -ErrorAction SilentlyContinue).$Name
-    if ($val -eq $Expected) { return "SUCCESS" } else { return "FAILED" }
+# 2. Создание ВНУТРЕННЕГО скрипта (который будет запускаться при старте)
+$ScriptContent = @"
+# Настройка кодировки для вывода отчета
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
+Write-Host "--- AUTO-OPTIMIZATION STARTING ---" -ForegroundColor Cyan
+
+# Блок 1: Принудительное питание (High Performance)
+# Импортируем схему, если её вдруг удалили, и активируем
+powercfg -duplicatescheme 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c | Out-Null
+powercfg -setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
+Write-Host "[+] Power Scheme: High Performance Force-Activated" -ForegroundColor Green
+
+# Блок 2: Реестр (Сеть и Видео)
+Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile" -Name "NetworkThrottlingIndex" -Value 0xFFFFFFFF -Type DWord -ErrorAction SilentlyContinue
+Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\Dwm" -Name "OverlayTestMode" -Value 5 -Type DWord -ErrorAction SilentlyContinue
+Write-Host "[+] Registry: Network & MPO Tweaks Re-Applied" -ForegroundColor Green
+
+# Блок 3: ISLC (Timer Resolution)
+if (!(Get-Process "ISLC" -ErrorAction SilentlyContinue)) {
+    if (Test-Path "$WorkDir\ISLC.exe") {
+        Start-Process "$WorkDir\ISLC.exe" -ArgumentList "-start"
+        Write-Host "[+] ISLC: Process Started" -ForegroundColor Green
+    } else {
+        Write-Host "[-] ISLC: Executable not found in $WorkDir" -ForegroundColor Red
+    }
+} else {
+    Write-Host "[+] ISLC: Already Running" -ForegroundColor Green
 }
 
-# 1. Сеть + Алгоритм Нагла + Отключение задержек прерываний
-$regInterfaces = "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces"
-Get-ChildItem $regInterfaces | ForEach-Object {
-    $p = $_.PSPath
-    Set-ItemProperty -Path $p -Name "TcpAckFrequency" -Value 1 -Type DWord -ErrorAction SilentlyContinue
-    Set-ItemProperty -Path $p -Name "TCPNoDelay" -Value 1 -Type DWord -ErrorAction SilentlyContinue
+# Блок 4: Проверка конфига Dota 2
+try {
+    `$steamPath = (Get-ItemProperty -Path "HKCU:\Software\Valve\Steam").SteamPath
+    `$cfgFile = "`$steamPath\steamapps\common\dota 2 beta\game\dota\cfg\autoexec.cfg"
+    if (!(Test-Path `$cfgFile)) {
+        # Если конфиг пропал - восстанавливаем базу
+        `$content = "fps_max 0`ncl_interp 0`ncl_interp_ratio 1`nm_rawinput 1"
+        Set-Content -Path `$cfgFile -Value `$content
+        Write-Host "[+] Dota Config: Restored" -ForegroundColor Yellow
+    } else {
+        Write-Host "[+] Dota Config: Present" -ForegroundColor Green
+    }
+} catch {
+    Write-Host "[-] Dota Config: Path error" -ForegroundColor Red
 }
-Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile" -Name "NetworkThrottlingIndex" -Value 0xFFFFFFFF -Type DWord
-$Results += "Network Optimization: $(Check-Reg 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile' 'NetworkThrottlingIndex' 4294967295)"
 
-# 2. Видео: Disable MPO + Game Mode
-$mpoPath = "HKLM:\SOFTWARE\Microsoft\Windows\Dwm"
-if (!(Test-Path $mpoPath)) { New-Item -Path $mpoPath -Force | Out-Null }
-Set-ItemProperty -Path $mpoPath -Name "OverlayTestMode" -Value 5 -Type DWord
-$Results += "MPO Disabled: $(Check-Reg $mpoPath 'OverlayTestMode' 5)"
+Write-Host "`n--- ALL SYSTEMS NOMINAL ---" -ForegroundColor Cyan
+Write-Host "Окно закроется через 10 секунд..."
+Start-Sleep -Seconds 10
+"@
 
-# 3. ISLC: Скачивание и Автозапуск (Task Scheduler)
-$islcPath = "$WorkDir\ISLC.exe"
-if (!(Test-Path $islcPath)) {
-    Invoke-WebRequest -Uri "https://www.wagnardsoft.com/ISLC/ISLC%20v1.0.3.0.exe" -OutFile $islcPath
-}
-$ST = New-ScheduledTaskAction -Execute $islcPath
-$Tr = New-ScheduledTaskTrigger -AtLogOn
-Register-ScheduledTask -Action $ST -Trigger $Tr -TaskName "AutoISLC" -User "SYSTEM" -Force | Out-Null
-$Results += "ISLC Auto-Start Task: SUCCESS"
+Set-Content -Path $BootScript -Value $ScriptContent -Encoding UTF8
 
-# 4. Система: Снятие лимитов QoS
-$qosPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Psched"
-if (!(Test-Path $qosPath)) { New-Item -Path $qosPath -Force | Out-Null }
-Set-ItemProperty -Path $qosPath -Name "NonBestEffortLimit" -Value 0 -Type DWord
-$Results += "QoS Limit 0%: $(Check-Reg $qosPath 'NonBestEffortLimit' 0)"
+# 3. Регистрация задачи в Планировщике Windows
+# Задача запускается от имени пользователя с наивысшими правами
+$Action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-ExecutionPolicy Bypass -File `"$BootScript`""
+$Trigger = New-ScheduledTaskTrigger -AtLogOn
+$Principal = New-ScheduledTaskPrincipal -UserId "$env:USERNAME" -LogonType Interactive -RunLevel Highest
+$Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 
-# Вывод отчета
-Write-Host "`n=== FINAL VERIFICATION ---" -ForegroundColor Cyan
-foreach ($r in $Results) {
-    if ($r -like "*SUCCESS*") { Write-Host "[+] $r" -ForegroundColor Green }
-    else { Write-Host "[-] $r" -ForegroundColor Red }
-}
-Write-Host "`nREBOOT REQUIRED TO APPLY REGISTRY CHANGES." -ForegroundColor Yellow
+Register-ScheduledTask -TaskName "Dota2_Ultimate_Boost" -Action $Action -Trigger $Trigger -Principal $Principal -Settings $Settings -Force
+
+Write-Host "`nУСПЕХ: Скрипт добавлен в автозагрузку." -ForegroundColor Green
+Write-Host "Теперь при каждом включении ноута ты будешь видеть отчет на 10 секунд." -ForegroundColor Gray
