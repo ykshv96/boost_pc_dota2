@@ -1,65 +1,59 @@
-# 1. Подготовка
-$WorkDir = "C:\Dota_Opt"
-if (!(Test-Path $WorkDir)) { New-Item -ItemType Directory -Path $WorkDir | Out-Null }
-$BootScript = "$WorkDir\startup_boost.ps1"
-
-# 2. Формирование контента скрипта
-$ScriptContent = @"
+# --- UNIVERSAL GAMING BOOSTER v6.0 ---
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-Write-Host "--- ULTIMATE SYSTEM OPTIMIZATION ---" -ForegroundColor Cyan
+Write-Host ">>> ЗАПУСК ГЛОБАЛЬНОЙ ОПТИМИЗАЦИИ (DOTA 2 / CS2 / BF) <<<" -ForegroundColor Cyan
 
-# Блок 1: Низкоуровневые таймеры (BCDEDIT)
-bcdedit /set disabledynamic_tick yes
-bcdedit /set useplatformclock no
-bcdedit /set tscsyncpolicy Enhanced
-Write-Host "[+] BCDEDIT: Timers & TSC Policy Optimized" -ForegroundColor Green
-
-# Блок 2: Питание и USB (Отключение всех энергосберегаек)
-powercfg -duplicatescheme 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c | Out-Null
-powercfg -setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
-# Отключение приостановки USB
-powercfg /SETACVALUEINDEX SCHEME_CURRENT 2a030bee-e91f-4ce0-8127-9102580242c7 48e6b7a6-50f0-450a-8d45-b7ad97b7e287 0
-# Отключение PCI Express Link State
-powercfg /SETACVALUEINDEX SCHEME_CURRENT ee12f753-d177-4952-9fab-2dca141208b0 ee12f753-d177-4952-9fab-2dca141208b0 0
-Write-Host "[+] Power: USB & PCIe Power Saving Disabled" -ForegroundColor Green
-
-# Блок 3: Реестр (FSO, Network, MPO)
-# Отключение Fullscreen Optimizations глобально
-Set-ItemProperty -Path "HKCU:\System\GameConfigStore" -Name "GameDVR_FSEBehavior" -Value 2 -Type DWord -ErrorAction SilentlyContinue
-# Сеть: TcpNoDelay + Отключение прерываний
-`$regInterfaces = "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces"
-Get-ChildItem `$regInterfaces | ForEach-Object {
-    Set-ItemProperty -Path `$_.PSPath -Name "TcpAckFrequency" -Value 1 -Type DWord -ErrorAction SilentlyContinue
-    Set-ItemProperty -Path `$_.PSPath -Name "TCPNoDelay" -Value 1 -Type DWord -ErrorAction SilentlyContinue
-}
-Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\Dwm" -Name "OverlayTestMode" -Value 5 -Type DWord -ErrorAction SilentlyContinue
-Write-Host "[+] Registry: FSO Disabled, Network Latency Minimal" -ForegroundColor Green
-
-# Блок 4: Запуск ISLC
-if (!(Get-Process "ISLC" -ErrorAction SilentlyContinue)) {
-    if (Test-Path "$WorkDir\ISLC.exe") { Start-Process "$WorkDir\ISLC.exe" -ArgumentList "-start" }
+# 1. ОБЩИЕ СИСТЕМНЫЕ НАСТРОЙКИ (BCDEDIT + ПИТАНИЕ)
+if (([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    bcdedit /set disabledynamic_tick yes; bcdedit /set useplatformclock no
+    powercfg -setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
+    Write-Host "[+] System Timers & Power: OK" -ForegroundColor Green
 }
 
-# Блок 5: Проверка конфига Доты (Force RAW Input)
-`$steamPath = (Get-ItemProperty -Path "HKCU:\Software\Valve\Steam").SteamPath
-`$cfgFile = "`$steamPath\steamapps\common\dota 2 beta\game\dota\cfg\autoexec.cfg"
-`$content = "fps_max 0`ncl_interp 0`ncl_interp_ratio 1`nm_rawinput 1`nsnd_mix_async 1"
-Set-Content -Path `$cfgFile -Value `$content
-Write-Host "[+] Dota Config: Autoexec Updated" -ForegroundColor Green
+# 2. ПОИСК ПУТЕЙ STEAM
+$steamPath = (Get-ItemProperty -Path "HKCU:\Software\Valve\Steam").SteamPath
+$common = "$steamPath\steamapps\common"
 
-Write-Host "`n--- OPTIMIZATION COMPLETE. SYSTEM READY ---" -ForegroundColor Cyan
-Start-Sleep -Seconds 5
+# --- БЛОК CS2 ---
+$cs2cfg = "$common\Counter-Strike Global Offensive\game\csgo\cfg"
+if (Test-Path $cs2cfg) {
+    $cs2Content = @"
+fps_max 0
+cl_updaterate 128
+cl_interp_ratio 1
+cl_interp 0.015625
+engine_no_focus_sleep 0
 "@
+    Set-Content -Path "$cs2cfg\autoexec.cfg" -Value $cs2Content
+    Write-Host "[+] CS2: Config applied." -ForegroundColor Green
+}
 
-Set-Content -Path $BootScript -Value $ScriptContent -Encoding UTF8
+# --- БЛОК BATTLEFIELD (Redsec/2042) ---
+# Для BF важно создать файл user.cfg в корне игры
+$bfPath = "$common\Battlefield 2042" # Замени на имя папки Redsec если отличается
+if (Test-Path $bfPath) {
+    $bfContent = @"
+Thread.ProcessorCount 8
+Thread.MaxProcessorCount 8
+Thread.MinFreeProcessorCount 0
+GstRender.Thread.MaxProcessorCount 8
+RenderDevice.Dx11Enable 0
+RenderDevice.Dx12Enable 1
+RenderDevice.FutureFrameRendering 0
+"@
+    Set-Content -Path "$bfPath\user.cfg" -Value $bfContent
+    Write-Host "[+] Battlefield: Multi-threading optimized." -ForegroundColor Green
+}
 
-# 3. Перерегистрация задачи в планировщике
-Unregister-ScheduledTask -TaskName "Dota2_Ultimate_Boost" -Confirm:$false -ErrorAction SilentlyContinue
-$Action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-ExecutionPolicy Bypass -File `"$BootScript`""
-$Trigger = New-ScheduledTaskTrigger -AtLogOn
-$Principal = New-ScheduledTaskPrincipal -UserId "$env:USERNAME" -LogonType Interactive -RunLevel Highest
-$Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+# --- БЛОК DOTA 2 ---
+$dotaCfg = "$common\dota 2 beta\game\dota\cfg"
+if (Test-Path $dotaCfg) {
+    Set-Content -Path "$dotaCfg\autoexec.cfg" -Value "fps_max 0`ncl_interp 0`nm_rawinput 1"
+    Write-Host "[+] Dota 2: Config applied." -ForegroundColor Green
+}
 
-Register-ScheduledTask -TaskName "Dota2_Ultimate_Boost" -Action $Action -Trigger $Trigger -Principal $Principal -Settings $Settings -Force
+# 3. УНИВЕРСАЛЬНЫЙ ПАРАМЕТР ЗАПУСКА (Копируется в буфер)
+# Эти флаги подходят для всех трех игр
+$universalLaunch = "-novid -high -dx11 -nojoy -threads 9"
+$universalLaunch | Set-Clipboard
 
-Write-Host "Все обновления внедрены. Перезагрузись для активации BCDEDIT твиков." -ForegroundColor Green
+Write-Host "`n[!] ПАРАМЕТРЫ ЗАПУСКА В БУФЕРЕ (Ctrl+V в Steam)." -ForegroundColor Yellow
