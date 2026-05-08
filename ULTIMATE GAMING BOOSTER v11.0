@@ -1,0 +1,240 @@
+# --- ULTIMATE GAMING BOOSTER v11.0 (исправление Dota 2 + полный набор) ---
+param([switch]$ReportOnly)
+
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$host.UI.RawUI.WindowTitle = "Ultimate Gaming Booster v11.0"
+
+# ------------------- ОТЧЁТ (после перезагрузки) -------------------
+function Show-Report {
+    Write-Host "`n============================================" -ForegroundColor Cyan
+    Write-Host "    ИТОГОВЫЙ ОТЧЁТ ПОСЛЕ ПЕРЕЗАГРУЗКИ" -ForegroundColor Cyan
+    Write-Host "============================================`n" -ForegroundColor Cyan
+
+    $oks = 0; $total = 0
+
+    $hpet = bcdedit /enum | Select-String "useplatformclock" -ErrorAction SilentlyContinue | ForEach-Object { $_.Line.Trim() }
+    $total++; Write-Host " HPET (useplatformclock) ........ " -NoNewline
+    if (-not $hpet) { Write-Host "✅ Параметр удалён (отключен)" -ForegroundColor Green; $oks++ } 
+    elseif ($hpet -match "No") { Write-Host "✅ Отключен" -ForegroundColor Green; $oks++ } 
+    else { Write-Host "❌ Не отключен" -ForegroundColor Red }
+
+    $dyn = bcdedit /enum | Select-String "disabledynamictick" -ErrorAction SilentlyContinue | ForEach-Object { $_.Line.Trim() }
+    $total++; Write-Host " Dynamic Ticks .................. " -NoNewline
+    if ($dyn -match "Yes") { Write-Host "✅ Отключены" -ForegroundColor Green; $oks++ } else { Write-Host "❌ Не отключены" -ForegroundColor Red }
+
+    $dev = Get-PnpDevice -FriendlyName "High Precision Event Timer" -ErrorAction SilentlyContinue
+    $total++; Write-Host " HPET (Device Manager) ......... " -NoNewline
+    if ($dev) {
+        if ($dev.Status -in @("Error","Unknown")) { Write-Host "✅ Отключён" -ForegroundColor Green; $oks++ }
+        else { Write-Host "❌ Активен" -ForegroundColor Red }
+    } else { Write-Host "✅ Отсутствует" -ForegroundColor Green; $oks++ }
+
+    $scheme = powercfg /getactivescheme
+    $isHP = $scheme -match "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c"
+    $total++; Write-Host " Схема питания ................. " -NoNewline
+    if ($isHP) { Write-Host "✅ High Performance" -ForegroundColor Green; $oks++ } else { Write-Host "⚠️ $($scheme.Split()[-1])" -ForegroundColor Yellow }
+
+    $gb = Get-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\GameDVR" -Name "AppCaptureEnabled" -ErrorAction SilentlyContinue
+    $total++; Write-Host " Game Bar запись ............... " -NoNewline
+    if ($gb.AppCaptureEnabled -eq 0) { Write-Host "✅ Отключена" -ForegroundColor Green; $oks++ } else { Write-Host "❌ Включена" -ForegroundColor Red }
+
+    $gdp = Get-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\GameDVR" -Name "AllowGameDVR" -ErrorAction SilentlyContinue
+    $total++; Write-Host " GameDVR политика .............. " -NoNewline
+    if ($gdp.AllowGameDVR -eq 0) { Write-Host "✅ Заблокирован" -ForegroundColor Green; $oks++ } else { Write-Host "❌ Не заблокирован" -ForegroundColor Red }
+
+    $sm = Get-Service -Name SysMain -ErrorAction SilentlyContinue
+    $total++; Write-Host " SysMain (Superfetch) .......... " -NoNewline
+    if ($sm.StartType -eq "Disabled") { Write-Host "✅ Отключена" -ForegroundColor Green; $oks++ } else { Write-Host "❌ $($sm.StartType)" -ForegroundColor Red }
+
+    $steamPath = (Get-ItemProperty -Path "HKCU:\Software\Valve\Steam" -ErrorAction SilentlyContinue).SteamPath
+    if ($steamPath) {
+        $apps = @{"CS2"=730; "Dota 2"=570}
+        foreach ($game in $apps.Keys) {
+            $manifest = "$steamPath\steamapps\appmanifest_$($apps[$game]).acf"
+            $total++; Write-Host " Параметры Steam ($game) " -NoNewline
+            if (Test-Path $manifest) {
+                $text = Get-Content $manifest -Raw
+                if ($text -match '"LaunchOptions"\s+"([^"]*)"') {
+                    Write-Host "      ✅ $($matches[1])" -ForegroundColor Green; $oks++
+                } else { Write-Host "      ❌ Не заданы" -ForegroundColor Red }
+            } else { Write-Host "      ❌ Игра не найдена" -ForegroundColor Red }
+        }
+
+        $cfg = @{
+            "CS2 autoexec.cfg"    = "$steamPath\steamapps\common\Counter-Strike Global Offensive\game\csgo\cfg\autoexec.cfg"
+            "Dota 2 autoexec.cfg" = "$steamPath\steamapps\common\dota 2 beta\game\dota\cfg\autoexec.cfg"
+        }
+        $bf6folder = Get-ChildItem "$steamPath\steamapps\common" -Directory | Where-Object { $_.Name -like "*Redsec*" -or $_.Name -like "*BF6*" } | Select-Object -First 1
+        if ($bf6folder) {
+            $cfg["Redsec BF6 user.cfg"] = "$($bf6folder.FullName)\user.cfg"
+        }
+        foreach ($name in $cfg.Keys) {
+            $total++; Write-Host " $name " -NoNewline
+            if (Test-Path $cfg[$name]) { Write-Host "       ✅ Найден" -ForegroundColor Green; $oks++ } else { Write-Host "       ❌ Отсутствует" -ForegroundColor Red }
+        }
+    } else {
+        Write-Host " [!] Steam не найден, проверка игр пропущена." -ForegroundColor Gray
+    }
+
+    $islcReg = Get-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "ISLC" -ErrorAction SilentlyContinue
+    $total++; Write-Host " ISLC автозапуск ............... " -NoNewline
+    if ($islcReg) { Write-Host "✅ Прописан" -ForegroundColor Green; $oks++ } else { Write-Host "❌ Не настроен" -ForegroundColor Yellow }
+
+    Write-Host "`n============================================" -ForegroundColor Cyan
+    Write-Host "   Результат: $oks из $total оптимизаций активно" -ForegroundColor $(if ($oks -eq $total) { 'Green' } else { 'Yellow' })
+    Write-Host "============================================" -ForegroundColor Cyan
+
+    Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\RunOnce" -Name "UltimateBoostReport" -ErrorAction SilentlyContinue
+    Read-Host "`nНажмите Enter, чтобы закрыть окно"
+}
+
+# ------------------- ОПТИМИЗАЦИЯ -------------------
+function Start-Optimizations {
+    Write-Host ">>> ULTIMATE GAMING BOOSTER v11.0 <<<" -ForegroundColor Cyan
+
+    Write-Host "[1/7] Таймеры..."
+    bcdedit /deletevalue useplatformclock 2>$null
+    bcdedit /set disabledynamictick yes
+    powercfg -setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
+    Write-Host "  [+] HPET значение удалено, Dynamic Ticks Yes, схема HP."
+
+    reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile" /v "SystemResponsiveness" /t REG_DWORD /d 0 /f | Out-Null
+    reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile" /v "NetworkThrottlingIndex" /t REG_DWORD /d 0xFFFFFFFF /f | Out-Null
+    Write-Host "  [+] Мультимедиа форсирован."
+
+    Write-Host "[2/7] Оверлеи..."
+    New-Item -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\GameDVR" -Force | Out-Null
+    Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\GameDVR" -Name "AllowGameDVR" -Value 0 -Type DWord
+    Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\GameDVR" -Name "AppCaptureEnabled" -Value 0 -Type DWord
+    Write-Host "  [+] Game Bar/DVR отключены."
+
+    Stop-Service SysMain -Force -ErrorAction SilentlyContinue
+    Set-Service SysMain -StartupType Disabled -ErrorAction SilentlyContinue
+    Write-Host "  [+] Superfetch остановлен."
+
+    Write-Host "[3/7] HPET в диспетчере..."
+    $hpetDev = Get-PnpDevice -FriendlyName "High Precision Event Timer" -ErrorAction SilentlyContinue
+    if ($hpetDev) { Disable-PnpDevice -InstanceId $hpetDev.InstanceId -Confirm:$false }
+    Write-Host "  [+] Готово."
+
+    Write-Host "[4/7] Steam и игры..."
+    $steamPath = (Get-ItemProperty -Path "HKCU:\Software\Valve\Steam" -ErrorAction SilentlyContinue).SteamPath
+    if ($steamPath) {
+        $common = "$steamPath\steamapps\common"
+
+        $cs2cfg = "$common\Counter-Strike Global Offensive\game\csgo\cfg"
+        if (Test-Path $cs2cfg) {
+            Set-Content -Path "$cs2cfg\autoexec.cfg" -Value @"
+fps_max 0
+cl_updaterate 128
+cl_cmdrate 128
+rate 786432
+cl_interp 0
+cl_interp_ratio 1
+cl_disable_ragdolls 1
+mat_queue_mode 2
+r_dynamic 0
+engine_no_focus_sleep 0
+"@ -Encoding UTF8
+            Write-Host "  [+] CS2 конфиг обновлён."
+        }
+
+        $dotaCfg = "$common\dota 2 beta\game\dota\cfg"
+        if (Test-Path $dotaCfg) {
+            Set-Content -Path "$dotaCfg\autoexec.cfg" -Value @"
+fps_max 0
+cl_interp 0
+m_rawinput 1
+engine_no_focus_sleep 0
+sv_forcepreload 1
+cl_cmdrate 60
+cl_updaterate 60
+rate 80000
+"@ -Encoding UTF8
+            Write-Host "  [+] Dota 2 конфиг обновлён."
+        }
+
+        $bf6folder = Get-ChildItem "$common" -Directory | Where-Object { $_.Name -like "*Redsec*" -or $_.Name -like "*BF6*" } | Select-Object -First 1
+        if ($bf6folder) {
+            $cores = (Get-CimInstance Win32_ComputerSystem).NumberOfLogicalProcessors
+            if (-not $cores) { $cores = 8 }
+            Set-Content -Path "$($bf6folder.FullName)\user.cfg" -Value @"
+Thread.ProcessorCount $cores
+Thread.MaxProcessorCount $cores
+Thread.MinFreeProcessorCount 0
+GstRender.Thread.MaxProcessorCount $cores
+RenderDevice.FutureFrameRendering 0
+PostProcess.DynamicAOEnable 0
+WorldRender.LightTileCsPathEnable 0
+WorldRender.MotionBlurEnable 0
+WorldRender.FilmicEffects 0
+WorldRender.WeaponDOFEnable 0
+"@ -Encoding UTF8
+            Write-Host "  [+] Redsec BF6 user.cfg создан."
+        }
+
+        Write-Host "[5/7] Параметры запуска Steam..."
+        $launch = @{
+            "730" = "-novid -nojoy -high -dx11 +fps_max 0 +mat_queue_mode 2 -forcenovsync"
+            "570" = "-novid -high -dx11 -nojoy -map dota +dota_force_right_click_attack 1"
+        }
+        foreach ($appId in $launch.Keys) {
+            $manifest = "$steamPath\steamapps\appmanifest_$appId.acf"
+            if (Test-Path $manifest) {
+                $content = Get-Content $manifest -Raw
+                $opt = $launch[$appId]
+                if ($content -match '"LaunchOptions"\s+"([^"]*)"') {
+                    $content = $content -replace '"LaunchOptions"\s+"[^"]*"', "`"LaunchOptions`" `"$opt`""
+                } else {
+                    $content = $content -replace '(\"StateFlags\"\s+\"\d+\")', "`$1`n`t`"LaunchOptions`" `"$opt`""
+                }
+                Set-Content -Path $manifest -Value $content
+                Write-Host "  [+] $appId параметры обновлены."
+            } else {
+                Write-Host "  [-] Манифест для $appId не найден."
+            }
+        }
+    } else {
+        Write-Host " [-] Steam не найден."
+    }
+
+    Write-Host "[6/7] ISLC..."
+    $islcExe = @("C:\ISLC\ISLC.exe", "$env:USERPROFILE\Desktop\ISLC\ISLC.exe", "$env:USERPROFILE\Downloads\ISLC\ISLC.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+    if ($islcExe) {
+        Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "ISLC" -Value $islcExe -Force
+        Write-Host "  [+] ISLC в автозагрузке."
+    } else {
+        Write-Host "  [!] ISLC.exe не найден (скачай с wagnardsoft.com)." -ForegroundColor Yellow
+    }
+
+    Write-Host "[7/7] Создание файла на рабочем столе..."
+    # Сохраняем себя в файл на рабочем столе для будущих запусков
+    $selfPath = "$env:USERPROFILE\Desktop\UltimateBoost.ps1"
+    $scriptBody = @"
+# UltimateBoost v11.0
+$($MyInvocation.MyCommand.ScriptBlock.ToString())
+"@
+    Set-Content -Path $selfPath -Value $scriptBody -Encoding UTF8
+    Write-Host "  [+] Файл $selfPath создан."
+
+    # Автоотчёт после перезагрузки
+    $runOnceValue = "powershell -NoProfile -NoExit -File `"$selfPath`" -ReportOnly"
+    Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\RunOnce" -Name "UltimateBoostReport" -Value $runOnceValue -Force
+
+    Write-Host "`n============================================" -ForegroundColor Cyan
+    Write-Host " ГОТОВО. ПЕРЕЗАГРУЗИТЕ ПК." -ForegroundColor Green
+    Write-Host " После входа появится окно с отчётом." -ForegroundColor Green
+    Write-Host "============================================" -ForegroundColor Cyan
+    Read-Host "`nНажмите Enter для выхода"
+}
+
+# Точка входа
+if (-not $ReportOnly) {
+    if (-NOT ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        Write-Host "[!] Запустите от имени Администратора!" -ForegroundColor Red
+        Read-Host
+        return
+    }
+}
+
+if ($ReportOnly) { Show-Report } else { Start-Optimizations }
