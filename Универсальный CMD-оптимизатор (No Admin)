@@ -1,0 +1,61 @@
+@echo off
+echo >>> STARTING CLUB OPTIMIZATION (CMD MODE) <<<
+
+:: 1. ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ (Driver-Level Low Latency)
+:: setx устанавливает переменные в профиль пользователя навсегда (до перезагрузки)
+setx __GL_THREADED_OPTIMIZATIONS 1
+setx __GL_MAX_FRAMES_ALLOWED 1
+setx DXVK_ASYNC 1
+echo [+] Driver Variables: SET
+
+:: 2. ОТКЛЮЧЕНИЕ АКСЕЛЕРАЦИИ МЫШИ (Реестр пользователя)
+reg add "HKCU\Control Panel\Mouse" /v MouseSpeed /t REG_SZ /d 0 /f
+reg add "HKCU\Control Panel\Mouse" /v MouseThreshold1 /t REG_SZ /d 0 /f
+reg add "HKCU\Control Panel\Mouse" /v MouseThreshold2 /t REG_SZ /d 0 /f
+reg add "HKCU\Control Panel\Desktop" /v MenuShowDelay /t REG_SZ /d 0 /f
+echo [+] Registry: Mouse & Menu Optimized
+
+:: 3. СОЗДАНИЕ КОНФИГОВ (Dota 2 / CS2)
+:: Ищем путь к Steam через реестр
+for /f "tokens=2*" %%a in ('reg query "HKCU\Software\Valve\Steam" /v SteamPath') do set "SteamPath=%%b"
+set "Common=%SteamPath%\steamapps\common"
+
+:: Dota 2
+if exist "%Common%\dota 2 beta\game\dota\cfg" (
+    echo fps_max 0 > "%Common%\dota 2 beta\game\dota\cfg\autoexec.cfg"
+    echo cl_interp 0 >> "%Common%\dota 2 beta\game\dota\cfg\autoexec.cfg"
+    echo cl_interp_ratio 1 >> "%Common%\dota 2 beta\game\dota\cfg\autoexec.cfg"
+    echo m_rawinput 1 >> "%Common%\dota 2 beta\game\dota\cfg\autoexec.cfg"
+    echo [+] Dota 2 Config: OK
+)
+
+:: CS2
+if exist "%Common%\Counter-Strike Global Offensive\game\csgo\cfg" (
+    echo fps_max 0 > "%Common%\Counter-Strike Global Offensive\game\csgo\cfg\autoexec.cfg"
+    echo cl_interp 0.015625 >> "%Common%\Counter-Strike Global Offensive\game\csgo\cfg\autoexec.cfg"
+    echo cl_interp_ratio 1 >> "%Common%\Counter-Strike Global Offensive\game\csgo\cfg\autoexec.cfg"
+    echo [+] CS2 Config: OK
+)
+
+:: Battlefield (user.cfg в корень)
+if exist "%Common%\Battlefield 2042" (
+    echo Thread.ProcessorCount 8 > "%Common%\Battlefield 2042\user.cfg"
+    echo RenderDevice.Dx12Enable 1 >> "%Common%\Battlefield 2042\user.cfg"
+    echo RenderDevice.FutureFrameRendering 0 >> "%Common%\Battlefield 2042\user.cfg"
+    echo [+] Battlefield Config: OK
+)
+
+:: 4. ПАРАМЕТРЫ ЗАПУСКА
+echo.
+echo === ПАРАМЕТРЫ ЗАПУСКА (Скопируй вручную) ===
+echo -novid -high -dx11 -nojoy +exec autoexec.cfg
+echo ===========================================
+
+:: 5. ПРИОРИТЕТ (Попытка через WMIC)
+echo Ожидание запуска игры для установки приоритета...
+:loop
+wmic process where name="dota2.exe" CALL setpriority "high priority" >nul 2>&1
+wmic process where name="cs2.exe" CALL setpriority "high priority" >nul 2>&1
+wmic process where name="BF2042.exe" CALL setpriority "high priority" >nul 2>&1
+timeout /t 5 >nul
+goto loop
